@@ -1,6 +1,10 @@
 import numpy as np
 
 
+def softmax(x):
+    e_x=np.exp(x-np.max(x))
+    return e_x/e_x.sum()
+
 x1=np.array([1.0,2.0,3.0])
 x2=np.array([4.0,5.0,6.0])
 
