@@ -11,7 +11,7 @@ Usage (CPU example):
 
 Options:
     --data-zip   Path to data.zip   (default: ./data.zip)
-    --epochs     Number of epochs   (default: 200)
+    --epochs     Number of epochs   (default: 30)
     --lr         Learning‑rate      (default: 1e-2)
     --hidden     Hidden dim         (default: 16)
     --dropout    Dropout prob       (default: 0.1)
@@ -169,6 +169,17 @@ def sample_negative_edges(G, num):
 # STEP 5 – Train / evaluate helpers
 # -----------------------------------------------------------------------------
 
+def create_batches(edges,batch_size):
+    """Create batches from edge list."""
+    for i in range(0,len(edges),batch_size):
+        yield edges[i:i+batch_size]
+
+def shuffle_edges(edges):
+    """Shuffle edges for each epoch."""
+    indices=torch.randperm(len(edges))
+    return edges[indices]
+
+
 def link_loss(pos, neg, Q=2):
     eps = 1e-15
     return -(torch.log(pos + eps).mean() + Q * torch.log(1 - neg + eps).mean())
@@ -188,20 +199,58 @@ def auc_score(model, X, adj, edges_pos, G):
 # STEP 6 – Main training loop with early stopping
 # -----------------------------------------------------------------------------
 
-def train(model, G, X, adj, train_e, val_e, epochs, lr, patience):
+from torch.utils.data import DataLoader, TensorDataset
+
+def train(model, G, X, adj, train_e, val_e, epochs, lr, patience,batch_size=256):
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=4e-5)
     best_val, wait, best_state = 0, 0, None
-    for epoch in range(1, epochs + 1):
-        model.train(); opt.zero_grad()
-        edge_pos = torch.tensor(train_e, dtype=torch.long)
-        pos_logits = model(X, adj, edge_pos.t())
-        edge_neg = sample_negative_edges(G, len(edge_pos))
-        neg_logits = model(X, adj, edge_neg.t())
-        loss = link_loss(pos_logits, neg_logits)
-        loss.backward(); opt.step()
 
+    train_edges=torch.tensor(train_e, dtype=torch.long)
+    dataset=TensorDataset(train_edges)
+    dataloader=DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    # for epoch in range(1, epochs + 1):
+    #     model.train(); opt.zero_grad()
+    #     edge_pos = torch.tensor(train_e, dtype=torch.long)
+    #     pos_logits = model(X, adj, edge_pos.t())
+    #     edge_neg = sample_negative_edges(G, len(edge_pos))
+    #     neg_logits = model(X, adj, edge_neg.t())
+    #     loss = link_loss(pos_logits, neg_logits)
+    #     loss.backward(); opt.step()
+
+    #     val_auc = auc_score(model, X, adj, torch.tensor(val_e, dtype=torch.long), G)
+    #     print(f"Epoch {epoch:3d} | loss {loss.item():.4f} | val AUC {val_auc:.4f}")
+
+    #     if val_auc > best_val:
+    #         best_val, wait = val_auc, 0
+    #         best_state = copy.deepcopy(model.state_dict())
+    #     else:
+    #         wait += 1
+    #         if wait == patience:
+    #             print("Early stopping…")
+    #             break
+    # model.load_state_dict(best_state)
+    # return best_val
+    for epoch in range(1, epochs + 1):
+        model.train()
+        epoch_loss = 0
+        
+        for batch_edges, in dataloader:
+            opt.zero_grad()
+            
+            pos_logits = model(X, adj, batch_edges.t())
+            neg_edges = sample_negative_edges(G, len(batch_edges))
+            neg_logits = model(X, adj, neg_edges.t())
+            
+            loss = link_loss(pos_logits, neg_logits)
+            loss.backward()
+            opt.step()
+            
+            epoch_loss += loss.item()
+        
+        avg_loss = epoch_loss / len(dataloader)
         val_auc = auc_score(model, X, adj, torch.tensor(val_e, dtype=torch.long), G)
-        print(f"Epoch {epoch:3d} | loss {loss.item():.4f} | val AUC {val_auc:.4f}")
+        print(f"Epoch {epoch:3d} | loss {avg_loss:.4f} | val AUC {val_auc:.4f}")
 
         if val_auc > best_val:
             best_val, wait = val_auc, 0
@@ -211,6 +260,7 @@ def train(model, G, X, adj, train_e, val_e, epochs, lr, patience):
             if wait == patience:
                 print("Early stopping…")
                 break
+    
     model.load_state_dict(best_state)
     return best_val
 
@@ -223,11 +273,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-zip", type=Path, default=Path("data.zip"))
     parser.add_argument("--out-dir",  type=Path, default=Path("data"))
-    parser.add_argument("--epochs",   type=int,   default=200)
+    parser.add_argument("--epochs",   type=int,   default=30)
     parser.add_argument("--lr",       type=float, default=1e-2)
     parser.add_argument("--hidden",   type=int,   default=16)
     parser.add_argument("--dropout",  type=float, default=0.1)
-    parser.add_argument("--patience", type=int,   default=10)
+    parser.add_argument("--patience", type=int,   default=30)
+    parser.add_argument("--batch-size", type=int, default=256)
     args = parser.parse_args()
 
     set_seed(SEED)
