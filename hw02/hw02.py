@@ -277,17 +277,28 @@ def main():
     parser.add_argument("--lr",       type=float, default=1e-2)
     parser.add_argument("--hidden",   type=int,   default=16)
     parser.add_argument("--dropout",  type=float, default=0.1)
-    parser.add_argument("--patience", type=int,   default=30)
+    parser.add_argument("--patience", type=int,   default=10)
     parser.add_argument("--batch-size", type=int, default=256)
     args = parser.parse_args()
 
     set_seed(SEED)
+
+    # Check device availability
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    
+    if torch.cuda.is_available():
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
 
     # 1 – data
     # cora_dir = ensure_cora(args.data_zip, args.out_dir)
     cora_dir="data/cora"
     G, X = load_cora(cora_dir)
     adj = build_adj(G)
+
+    # Move data to device
+    X = X.to(device)
+    adj = adj.to(device) if hasattr(adj, 'to') else adj
 
     # 2 – edge split
     edges = np.array(G.edges())
@@ -296,6 +307,7 @@ def main():
 
     # 3 – model
     model = GCNLink(in_dim=X.size(1), hidden_dim=args.hidden, dropout=args.dropout)
+    model = model.to(device)
     print(model)
 
     # 4 – train
